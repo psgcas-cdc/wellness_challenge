@@ -70,6 +70,33 @@ function getTimeAgo(date) {
     return `${Math.floor(seconds / 86400)}d ago`;
 }
 
+function getGoogleDriveDirectLink(driveUrl) {
+    if (!driveUrl) return null;
+    
+    if (driveUrl.includes('drive.google.com')) {
+        let fileId = null;
+        
+        let match = driveUrl.match(/\/d\/([a-zA-Z0-9_-]+)/);
+        if (match && match[1]) {
+            fileId = match[1];
+        }
+        
+        if (!fileId) {
+            match = driveUrl.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+            if (match && match[1]) {
+                fileId = match[1];
+            }
+        }
+        
+        if (fileId) {
+            // Alternative: Use the uc endpoint with export=download
+            return `https://lh3.googleusercontent.com/d/${fileId}`;
+        }
+    }
+    
+    return driveUrl;
+}
+
 // ============================================
 // INITIALIZATION
 // ============================================
@@ -121,6 +148,8 @@ async function loadActivities() {
 
     activities = data;
 }
+
+
 
 // ============================================
 // LOGIN/LOGOUT
@@ -613,19 +642,25 @@ async function loadLeaderboard() {
             *,
             participants (name, nick_name, photo)
         `)
-        .eq('week_start_date', currentLeaderboardWeek)
-        .order('participants(name)', { ascending: true });
+        .eq('week_start_date', currentLeaderboardWeek);
 
     if (error) {
         console.error('Error loading leaderboard:', error);
         return;
     }
 
+    // Sort alphabetically by full name after fetching
+    scores.sort((a, b) => {
+        const nameA = a.participants.name.toLowerCase();
+        const nameB = b.participants.name.toLowerCase();
+        return nameA.localeCompare(nameB);
+    });
+
     renderLeaderboardChart(scores);
     renderLeaderboardList(scores);
 }
 
-function renderLeaderboardChart(scores) {
+async function renderLeaderboardChart(scores) {
     const ctx = document.getElementById('leaderboardChart');
     
     if (leaderboardChart) {
@@ -637,18 +672,98 @@ function renderLeaderboardChart(scores) {
         return;
     }
 
-    // Create labels array with empty slots at start and end
-    const labels = ['', ...scores.map(s => s.participants.nick_name || s.participants.name), ''];
+    // Sort by score for podium effect
+    const sortedScores = [...scores].sort((a, b) => b.total_points - a.total_points);
     
-    // Create points array with null values at start and end
-    const points = [null, ...scores.map(s => s.total_points), null];
-    
-    // Prepare images for point styles
-    const pointImages = [null, ...scores.map(s => {
-        const img = new Image(40, 40);
-        img.src = s.participants.photo || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23ddd"%3E%3Cpath d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/%3E%3C/svg%3E';
-        return img;
+    // Create labels and adjust Y positions for podium effect
+    const labels = ['', ...sortedScores.map(s => s.participants.nick_name || s.participants.name), ''];
+    const points = [null, ...sortedScores.map((s, idx) => {
+        // Add subtle height boost for top 3
+        let boost = 0;
+        if (idx === 0) boost = 2;
+        else if (idx === 1) boost = 1;
+        else if (idx === 2) boost = 0.5;
+        return s.total_points + boost;
     }), null];
+    
+    // Preload images with size variation for top 3
+    const pointImages = await Promise.all([
+        Promise.resolve(null),
+        ...sortedScores.map((s, idx) => {
+            return new Promise((resolve) => {
+                const size = idx === 0 ? 50 : idx === 1 ? 45 : idx === 2 ? 42 : 38;
+                const img = new Image(size, size);
+                img.crossOrigin = 'anonymous';
+                
+                const fallbackSvg = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23ddd"%3E%3Cpath d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/%3E%3C/svg%3E';
+                
+                img.onload = () => resolve(img);
+                img.onerror = () => {
+                    const fallbackImg = new Image(size, size);
+                    fallbackImg.src = fallbackSvg;
+                    fallbackImg.onload = () => resolve(fallbackImg);
+                };
+                
+                const photoUrl = getGoogleDriveDirectLink(s.participants.photo);
+                img.src = photoUrl || fallbackSvg;
+            });
+        }),
+        Promise.resolve(null)
+    ]);
+
+    // Create custom point styles with aura effect
+    const pointStyles = pointImages.map((img, idx) => {
+        if (!img) return null;
+        
+        const canvas = document.createElement('canvas');
+        const size = img.width;
+        const padding = 8;
+        canvas.width = size + padding * 2;
+        canvas.height = size + padding * 2;
+        const ctx = canvas.getContext('2d');
+        
+        // Draw aura based on rank
+        if (idx >= 1 && idx <= 3) {
+            const gradient = ctx.createRadialGradient(
+                canvas.width / 2, canvas.height / 2, size / 2,
+                canvas.width / 2, canvas.height / 2, size / 2 + padding
+            );
+            
+            if (idx === 1) { // 1st place - gold aura
+                gradient.addColorStop(0, 'rgba(255, 215, 0, 0.4)');
+                gradient.addColorStop(1, 'rgba(255, 215, 0, 0)');
+            } else if (idx === 2) { // 2nd place - silver aura
+                gradient.addColorStop(0, 'rgba(192, 192, 192, 0.4)');
+                gradient.addColorStop(1, 'rgba(192, 192, 192, 0)');
+            } else if (idx === 3) { // 3rd place - bronze aura
+                gradient.addColorStop(0, 'rgba(205, 127, 50, 0.4)');
+                gradient.addColorStop(1, 'rgba(205, 127, 50, 0)');
+            }
+            
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+        
+        // Draw circular border
+        ctx.beginPath();
+        ctx.arc(canvas.width / 2, canvas.height / 2, size / 2 + 2, 0, Math.PI * 2);
+        if (idx === 1) ctx.strokeStyle = '#FFD700';
+        else if (idx === 2) ctx.strokeStyle = '#C0C0C0';
+        else if (idx === 3) ctx.strokeStyle = '#CD7F32';
+        else ctx.strokeStyle = '#E5E7EB';
+        ctx.lineWidth = 3;
+        ctx.stroke();
+        
+        // Clip to circle and draw image
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(canvas.width / 2, canvas.height / 2, size / 2, 0, Math.PI * 2);
+        ctx.clip();
+        ctx.drawImage(img, padding, padding, size, size);
+        ctx.restore();
+        
+        return canvas;
+    });
 
     leaderboardChart = new Chart(ctx, {
         type: 'line',
@@ -657,55 +772,63 @@ function renderLeaderboardChart(scores) {
             datasets: [{
                 label: 'Points',
                 data: points,
-                pointStyle: pointImages,
-                pointRadius: 20,
-                pointHoverRadius: 25,
-                borderColor: '#0EA5E9',
-                backgroundColor: '#0EA5E9',
-                borderWidth: 0,
-                tension: 0,
-                showLine: false // Don't connect the points with lines
+                pointStyle: pointStyles,
+                pointRadius: pointImages.map((img, idx) => img ? img.width / 2 + 4 : 0),
+                pointHoverRadius: pointImages.map((img, idx) => img ? img.width / 2 + 8 : 0),
+                borderColor: 'rgba(14, 165, 233, 0.3)',
+                backgroundColor: 'rgba(14, 165, 233, 0.1)',
+                borderWidth: 2,
+                tension: 0.4,
+                showLine: true,
+                fill: false
             }]
         },
         options: {
             responsive: true,
             maintainAspectRatio: true,
+            animation: {
+                duration: 1500,
+                easing: 'easeOutQuart',
+                delay: (context) => {
+                    return context.dataIndex * 100;
+                }
+            },
             plugins: {
                 legend: {
                     display: false
                 },
                 tooltip: {
-                    backgroundColor: '#1F2937',
+                    backgroundColor: 'rgba(31, 41, 55, 0.95)',
                     titleColor: '#FFFFFF',
                     bodyColor: '#FFFFFF',
                     borderColor: '#374151',
                     borderWidth: 1,
-                    padding: 12,
+                    padding: 16,
                     displayColors: false,
                     titleFont: {
                         family: 'Inter',
-                        size: 14,
+                        size: 15,
                         weight: '600'
                     },
                     bodyFont: {
                         family: 'Inter',
-                        size: 13
+                        size: 14
                     },
                     callbacks: {
                         title: function(context) {
-                            // Skip first and last (empty) entries
-                            if (context[0].dataIndex === 0 || context[0].dataIndex === scores.length + 1) {
+                            if (context[0].dataIndex === 0 || context[0].dataIndex === sortedScores.length + 1) {
                                 return '';
                             }
-                            const scoreIndex = context[0].dataIndex - 1; // Adjust for offset
-                            return scores[scoreIndex].participants.name;
+                            const scoreIndex = context[0].dataIndex - 1;
+                            return sortedScores[scoreIndex].participants.name;
                         },
                         label: function(context) {
-                            // Skip first and last (empty) entries
-                            if (context.dataIndex === 0 || context.dataIndex === scores.length + 1) {
+                            if (context.dataIndex === 0 || context.dataIndex === sortedScores.length + 1) {
                                 return '';
                             }
-                            return `Points: ${context.parsed.y.toFixed(1)}`;
+                            const scoreIndex = context.dataIndex - 1;
+                            const actualPoints = sortedScores[scoreIndex].total_points;
+                            return `Points: ${actualPoints.toFixed(1)}`;
                         }
                     }
                 }
@@ -714,8 +837,14 @@ function renderLeaderboardChart(scores) {
                 y: {
                     beginAtZero: true,
                     grid: {
-                        color: '#F3F4F6',
-                        drawBorder: false
+                        color: (context) => {
+                            // Fade grid lines at edges
+                            const ratio = context.index / (context.chart.scales.y.ticks.length - 1);
+                            const opacity = Math.sin(ratio * Math.PI) * 0.15;
+                            return `rgba(156, 163, 175, ${opacity})`;
+                        },
+                        drawBorder: false,
+                        lineWidth: 1
                     },
                     ticks: {
                         color: '#6B7280',
@@ -738,9 +867,44 @@ function renderLeaderboardChart(scores) {
                         }
                     }
                 }
+            },
+            interaction: {
+                intersect: false,
+                mode: 'point'
+            },
+            onHover: (event, activeElements) => {
+                event.native.target.style.cursor = activeElements.length > 0 ? 'pointer' : 'default';
             }
         }
     });
+    
+    // Add click interaction
+    ctx.onclick = (event) => {
+        const points = leaderboardChart.getElementsAtEventForMode(event, 'nearest', { intersect: true }, true);
+        if (points.length > 0) {
+            const dataIndex = points[0].index;
+            if (dataIndex > 0 && dataIndex <= sortedScores.length) {
+                const participant = sortedScores[dataIndex - 1];
+                // Scroll to that participant in the list
+                const listItem = document.querySelector(`#breakdown-${participant.participant_id}`);
+                if (listItem) {
+                    listItem.closest('.leaderboard-item').scrollIntoView({ 
+                        behavior: 'smooth', 
+                        block: 'center' 
+                    });
+                    // Flash highlight
+                    const item = listItem.closest('.leaderboard-item');
+                    item.style.transition = 'all 0.3s ease';
+                    item.style.transform = 'scale(1.02)';
+                    item.style.boxShadow = '0 8px 24px rgba(14, 165, 233, 0.3)';
+                    setTimeout(() => {
+                        item.style.transform = '';
+                        item.style.boxShadow = '';
+                    }, 600);
+                }
+            }
+        }
+    };
 }
 
 function renderLeaderboardList(scores) {
@@ -756,7 +920,7 @@ function renderLeaderboardList(scores) {
         const item = document.createElement('div');
         item.className = `leaderboard-item rank-${index + 1}`;
         
-        const photoUrl = score.participants.photo || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23ddd"%3E%3Cpath d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/%3E%3C/svg%3E';
+        const photoUrl = getGoogleDriveDirectLink(score.participants.photo) || 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23ddd"%3E%3Cpath d="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"/%3E%3C/svg%3E';
         
         item.innerHTML = `
             <div class="rank-badge">${index + 1}</div>
