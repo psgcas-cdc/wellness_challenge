@@ -678,12 +678,11 @@ async function renderLeaderboardChart(scores) {
     // Create labels and adjust Y positions for podium effect
     const labels = ['', ...sortedScores.map(s => s.participants.nick_name || s.participants.name), ''];
     const points = [null, ...sortedScores.map((s, idx) => {
-        // Add subtle height boost for top 3
-        let boost = 0;
-        if (idx === 0) boost = 2;
-        else if (idx === 1) boost = 1;
-        else if (idx === 2) boost = 0.5;
-        return s.total_points + boost;
+        // Only add boost if they actually have points
+        if (s.total_points === 0) {
+            return null; // Don't show on chart if zero points
+        }
+        return s.total_points;  // Just return actual points
     }), null];
     
     // Preload images with size variation for top 3
