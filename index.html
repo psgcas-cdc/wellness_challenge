@@ -171,6 +171,34 @@
         </button>
     </main>
 
+    <!-- Activity Breakdown Modal (Mobile Full-Screen) -->
+    <div class="modal-overlay breakdown-modal-overlay" id="breakdownModal" onclick="closeBreakdownModal(event)">
+        <div class="breakdown-modal" onclick="event.stopPropagation()">
+            <div class="breakdown-modal-header">
+                <button class="breakdown-modal-back" onclick="closeBreakdownModal()">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <polyline points="15 18 9 12 15 6"/>
+                    </svg>
+                </button>
+                <h2 class="breakdown-modal-title" id="breakdownModalTitle"></h2>
+            </div>
+            
+            <div class="breakdown-modal-body">
+                <div class="breakdown-week-display" id="breakdownWeekDisplay"></div>
+                
+                <div class="breakdown-summary" id="breakdownSummary"></div>
+                
+                <div class="breakdown-separator"></div>
+                
+                <div class="breakdown-activities" id="breakdownActivities"></div>
+                
+                <div class="breakdown-separator"></div>
+                
+                <div class="breakdown-bonus" id="breakdownBonus"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- Log Activity Modal -->
     <div class="modal-overlay" id="logModal" onclick="closeLogModal(event)">
         <div class="modal" onclick="event.stopPropagation()">
@@ -207,6 +235,7 @@
         </div>
     </div>
 
+
     <!-- Success Toast -->
     <div class="toast" id="successToast">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -214,6 +243,39 @@
         </svg>
         <span id="toastMessage"></span>
     </div>
+
+    <!-- Bottom Navigation (Mobile Only) -->
+    <nav class="bottom-nav">
+        <button class="bottom-nav-btn active" onclick="showTab('dashboard')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <rect x="3" y="3" width="7" height="7"/>
+                <rect x="14" y="3" width="7" height="7"/>
+                <rect x="14" y="14" width="7" height="7"/>
+                <rect x="3" y="14" width="7" height="7"/>
+            </svg>
+            <span>Dashboard</span>
+        </button>
+        <button class="bottom-nav-btn" onclick="showTab('leaderboard')">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/>
+                <path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/>
+                <path d="M4 22h16"/>
+                <path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/>
+                <path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/>
+                <path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/>
+            </svg>
+            <span>Leaderboard</span>
+        </button>
+        <button class="bottom-nav-btn" onclick="openLogModal()">
+            <div class="bottom-nav-fab">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <line x1="12" y1="5" x2="12" y2="19"/>
+                    <line x1="5" y1="12" x2="19" y2="12"/>
+                </svg>
+            </div>
+            <span>Log Activity</span>
+        </button>
+    </nav>
 
     <script src="app.js"></script>
 </body>
