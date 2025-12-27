@@ -199,10 +199,28 @@ function logout() {
 // TABS
 // ============================================
 function showTab(tabName) {
+    // Update desktop tabs
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
     document.querySelectorAll('.content-section').forEach(s => s.classList.remove('active'));
     
-    event.target.closest('.tab').classList.add('active');
+    // Update bottom navigation
+    document.querySelectorAll('.bottom-nav-btn').forEach(btn => btn.classList.remove('active'));
+    
+    // Find and activate the correct bottom nav button
+    const bottomNavBtns = document.querySelectorAll('.bottom-nav-btn');
+    bottomNavBtns.forEach(btn => {
+        const btnText = btn.querySelector('span').textContent.toLowerCase();
+        if (btnText === tabName.toLowerCase()) {
+            btn.classList.add('active');
+        }
+    });
+    
+    // Activate desktop tab if exists
+    const desktopTab = document.querySelector(`.tab[onclick*="${tabName}"]`);
+    if (desktopTab) {
+        desktopTab.classList.add('active');
+    }
+    
     document.getElementById(tabName + 'Tab').classList.add('active');
 
     if (tabName === 'dashboard') {
@@ -948,6 +966,16 @@ function renderLeaderboardList(scores) {
 }
 
 async function toggleBreakdown(participantId, weekStart, button) {
+    // Check if mobile
+    const isMobile = window.innerWidth <= 768;
+    
+    if (isMobile) {
+        // Open full-screen modal on mobile
+        await openBreakdownModal(participantId, weekStart);
+        return;
+    }
+    
+    // Desktop behavior (existing code)
     const breakdownDiv = document.getElementById(`breakdown-${participantId}`);
     const itemsDiv = document.getElementById(`breakdown-items-${participantId}`);
     
@@ -1005,7 +1033,6 @@ async function toggleBreakdown(participantId, weekStart, button) {
                 activityData.points = Math.min(activityData.points, activity.max_points);
             }
         } else {
-            // Daily boolean
             const daysCompleted = activityData.value;
             if (daysCompleted >= activity.min_threshold) {
                 activityData.points = activity.min_points;
@@ -1022,24 +1049,58 @@ async function toggleBreakdown(participantId, weekStart, button) {
     
     Object.keys(activityPoints).forEach(activityName => {
         const data = activityPoints[activityName];
+        const activity = logs.find(l => l.activities.name === activityName).activities;
         totalPoints += data.points;
         
         const item = document.createElement('div');
         item.className = 'breakdown-item';
         
         let valueDisplay = '';
+        let calculationBreakdown = '';
+        
         if (data.type === 'accumulative') {
             if (activityName === 'Walking') {
                 valueDisplay = `${data.value.toLocaleString()} steps`;
             } else {
                 valueDisplay = `${data.value} pages`;
             }
+            
+            if (data.value >= activity.min_threshold) {
+                const basePoints = activity.min_points;
+                const extraValue = data.value - activity.min_threshold;
+                const bonusPoints = Math.floor(extraValue / activity.increment_threshold) * activity.increment_points;
+                const cappedBonusPoints = Math.min(bonusPoints, activity.max_points - basePoints);
+                
+                if (bonusPoints > 0) {
+                    const extraUnits = activityName === 'Walking' ? 
+                        `${(extraValue - (extraValue % activity.increment_threshold)).toLocaleString()} steps` : 
+                        `${Math.floor(extraValue / activity.increment_threshold) * activity.increment_threshold} pages`;
+                    calculationBreakdown = `<br><span style="font-size: 0.75rem; color: var(--gray-500);">(Base ${basePoints.toFixed(1)} pt at ${activity.min_threshold.toLocaleString()}${activityName === 'Walking' ? ' steps' : ' pages'} + ${cappedBonusPoints.toFixed(1)} pt for extra ${extraUnits})</span>`;
+                } else {
+                    calculationBreakdown = `<br><span style="font-size: 0.75rem; color: var(--gray-500);">(Base ${basePoints.toFixed(1)} pt at ${activity.min_threshold.toLocaleString()}${activityName === 'Walking' ? ' steps' : ' pages'})</span>`;
+                }
+            }
         } else {
             valueDisplay = `${data.value} days`;
+            
+            if (data.value >= activity.min_threshold) {
+                const basePoints = activity.min_points;
+                const extraDays = data.value - activity.min_threshold;
+                const bonusPoints = extraDays * activity.increment_points;
+                
+                if (bonusPoints > 0) {
+                    calculationBreakdown = `<br><span style="font-size: 0.75rem; color: var(--gray-500);">(Base ${basePoints.toFixed(1)} pt at ${activity.min_threshold} days + ${bonusPoints.toFixed(1)} pt for ${extraDays} extra days)</span>`;
+                } else {
+                    calculationBreakdown = `<br><span style="font-size: 0.75rem; color: var(--gray-500);">(Base ${basePoints.toFixed(1)} pt at ${activity.min_threshold} days)</span>`;
+                }
+            }
         }
         
         item.innerHTML = `
-            <span class="breakdown-activity">${activityName}: ${valueDisplay}</span>
+            <div style="flex: 1;">
+                <div class="breakdown-activity">${activityName}: ${valueDisplay}</div>
+                ${calculationBreakdown}
+            </div>
             <span class="breakdown-points">${data.points.toFixed(1)} pts</span>
         `;
         itemsDiv.appendChild(item);
@@ -1078,6 +1139,222 @@ async function toggleBreakdown(participantId, weekStart, button) {
     
     breakdownDiv.classList.add('show');
     button.textContent = 'Hide Breakdown';
+}
+
+
+async function openBreakdownModal(participantId, weekStart) {
+    const modal = document.getElementById('breakdownModal');
+    const title = document.getElementById('breakdownModalTitle');
+    const weekDisplay = document.getElementById('breakdownWeekDisplay');
+    const summary = document.getElementById('breakdownSummary');
+    const activitiesDiv = document.getElementById('breakdownActivities');
+    const bonusDiv = document.getElementById('breakdownBonus');
+    
+    // Get participant info
+    const { data: participant } = await supabaseClient
+        .from('participants')
+        .select('name, nick_name')
+        .eq('id', participantId)
+        .single();
+    
+    title.textContent = `${participant.name}'s Activity Breakdown`;
+    weekDisplay.textContent = getWeekDisplay(weekStart);
+    
+    // Load breakdown data
+    const { data: logs, error } = await supabaseClient
+        .from('activity_logs')
+        .select(`
+            *,
+            activities (name, activity_type, min_threshold, min_points, increment_threshold, increment_points, max_points)
+        `)
+        .eq('participant_id', participantId)
+        .eq('week_start_date', weekStart);
+    
+    if (error) {
+        console.error('Error loading breakdown:', error);
+        return;
+    }
+    
+    // Calculate points per activity
+    const activityPoints = {};
+    
+    logs.forEach(log => {
+        const activity = log.activities;
+        if (!activityPoints[activity.name]) {
+            activityPoints[activity.name] = { points: 0, value: 0, type: activity.activity_type, activity: activity };
+        }
+        
+        if (activity.activity_type === 'accumulative') {
+            activityPoints[activity.name].value += parseFloat(log.value);
+        } else {
+            activityPoints[activity.name].value += 1;
+        }
+    });
+    
+    // Calculate points based on thresholds
+    Object.keys(activityPoints).forEach(activityName => {
+        const activityData = activityPoints[activityName];
+        const activity = activityData.activity;
+        
+        if (activity.activity_type === 'accumulative') {
+            const value = activityData.value;
+            if (value >= activity.min_threshold) {
+                activityData.points = activity.min_points;
+                activityData.basePoints = activity.min_points;
+                const extraValue = value - activity.min_threshold;
+                const increments = Math.floor(extraValue / activity.increment_threshold);
+                const bonusPoints = increments * activity.increment_points;
+                activityData.bonusPoints = Math.min(bonusPoints, activity.max_points - activity.min_points);
+                activityData.points += activityData.bonusPoints;
+                activityData.points = Math.min(activityData.points, activity.max_points);
+            } else {
+                activityData.basePoints = 0;
+                activityData.bonusPoints = 0;
+            }
+        } else {
+            const daysCompleted = activityData.value;
+            if (daysCompleted >= activity.min_threshold) {
+                activityData.basePoints = activity.min_points;
+                activityData.points = activity.min_points;
+                const extraDays = daysCompleted - activity.min_threshold;
+                activityData.bonusPoints = extraDays * activity.increment_points;
+                activityData.points += activityData.bonusPoints;
+                activityData.points = Math.min(activityData.points, activity.max_points);
+            } else {
+                activityData.basePoints = 0;
+                activityData.bonusPoints = 0;
+            }
+        }
+    });
+    
+    let totalPoints = 0;
+    const activitiesCompleted = Object.keys(activityPoints).length;
+    
+    // Render summary
+    Object.values(activityPoints).forEach(data => {
+        totalPoints += data.points;
+    });
+    
+    // Get bonus
+    const { data: scoreData } = await supabaseClient
+        .from('weekly_scores')
+        .select('bonus_points')
+        .eq('participant_id', participantId)
+        .eq('week_start_date', weekStart)
+        .single();
+    
+    const bonusPoints = scoreData?.bonus_points || 0;
+    
+    summary.innerHTML = `
+        <div class="breakdown-summary-row">
+            <span class="breakdown-summary-label">Activities Completed</span>
+            <span class="breakdown-summary-value">${activitiesCompleted} / 7</span>
+        </div>
+        <div class="breakdown-summary-row">
+            <span class="breakdown-summary-label">Activity Points</span>
+            <span class="breakdown-summary-value">${totalPoints.toFixed(1)} pts</span>
+        </div>
+        ${bonusPoints > 0 ? `
+            <div class="breakdown-summary-row">
+                <span class="breakdown-summary-label">All Activities Bonus</span>
+                <span class="breakdown-summary-value">+${bonusPoints} pts</span>
+            </div>
+        ` : ''}
+        <div class="breakdown-summary-row breakdown-summary-total">
+            <span class="breakdown-summary-label">Total Points</span>
+            <span class="breakdown-summary-value">${(totalPoints + bonusPoints).toFixed(1)} pts</span>
+        </div>
+    `;
+    
+    // Render activities
+    activitiesDiv.innerHTML = '';
+    
+    Object.keys(activityPoints).forEach(activityName => {
+        const data = activityPoints[activityName];
+        const activity = data.activity;
+        
+        let valueDisplay = '';
+        let baseInfo = '';
+        let bonusInfo = '';
+        
+        if (data.type === 'accumulative') {
+            if (activityName === 'Walking') {
+                valueDisplay = `${data.value.toLocaleString()} steps`;
+                baseInfo = `Base: ${data.basePoints.toFixed(1)} pts (${activity.min_threshold.toLocaleString()} steps)`;
+                if (data.bonusPoints > 0) {
+                    const extraSteps = data.value - activity.min_threshold;
+                    bonusInfo = `Bonus: +${data.bonusPoints.toFixed(1)} pts (${extraSteps.toLocaleString()} extra steps)`;
+                }
+            } else {
+                valueDisplay = `${data.value} pages`;
+                baseInfo = `Base: ${data.basePoints.toFixed(1)} pts (${activity.min_threshold} pages)`;
+                if (data.bonusPoints > 0) {
+                    const extraPages = data.value - activity.min_threshold;
+                    bonusInfo = `Bonus: +${data.bonusPoints.toFixed(1)} pts (${extraPages} extra pages)`;
+                }
+            }
+        } else {
+            valueDisplay = `${data.value} days completed`;
+            baseInfo = `Base: ${data.basePoints.toFixed(1)} pts (${activity.min_threshold} days)`;
+            if (data.bonusPoints > 0) {
+                const extraDays = data.value - activity.min_threshold;
+                bonusInfo = `Bonus: +${data.bonusPoints.toFixed(1)} pts (${extraDays} extra days)`;
+            }
+        }
+        
+        const card = document.createElement('div');
+        card.className = 'breakdown-activity-card';
+        card.innerHTML = `
+            <div class="breakdown-activity-header">
+                <div class="breakdown-activity-icon">
+                    ${activityIcons[activityName] || ''}
+                </div>
+                <div style="flex: 1;">
+                    <div class="breakdown-activity-name">${activityName}</div>
+                    <div class="breakdown-activity-value">${valueDisplay}</div>
+                </div>
+            </div>
+            <div class="breakdown-activity-points">
+                ${data.basePoints > 0 ? `
+                    <div class="breakdown-points-row">
+                        <span class="breakdown-points-label">${baseInfo}</span>
+                        <span class="breakdown-points-value">${data.basePoints.toFixed(1)} pts</span>
+                    </div>
+                ` : ''}
+                ${data.bonusPoints > 0 ? `
+                    <div class="breakdown-points-row">
+                        <span class="breakdown-points-label">${bonusInfo}</span>
+                        <span class="breakdown-points-value">+${data.bonusPoints.toFixed(1)} pts</span>
+                    </div>
+                ` : ''}
+                <div class="breakdown-points-row breakdown-points-total">
+                    <span class="breakdown-points-label">Activity Total</span>
+                    <span class="breakdown-points-value">${data.points.toFixed(1)} pts</span>
+                </div>
+            </div>
+        `;
+        activitiesDiv.appendChild(card);
+    });
+    
+    // Render bonus section
+    if (bonusPoints > 0) {
+        bonusDiv.innerHTML = `
+            <div class="breakdown-bonus-label">All Activities Completed Bonus</div>
+            <div class="breakdown-bonus-value">+${bonusPoints} pts</div>
+        `;
+        bonusDiv.style.display = 'flex';
+    } else {
+        bonusDiv.style.display = 'none';
+    }
+    
+    modal.classList.add('active');
+}
+
+function closeBreakdownModal(event) {
+    if (event && event.target !== event.currentTarget) return;
+    
+    const modal = document.getElementById('breakdownModal');
+    modal.classList.remove('active');
 }
 
 async function calculateWeekScores(weekStart) {
