@@ -440,13 +440,37 @@ body {
     border-radius: 2px;
 }
 
+
 .chart-container {
     position: relative;
     height: 300px;
 }
 
+
 .chart-container canvas {
     max-height: 300px;
+}
+
+.leaderboard-chart-container {
+    position: relative;
+}
+
+.leaderboard-chart-container::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(to bottom, rgba(14, 165, 233, 0.02), transparent);
+    border-radius: var(--radius);
+    pointer-events: none;
+    z-index: 0;
+}
+
+.leaderboard-chart-container canvas {
+    position: relative;
+    z-index: 1;
 }
 
 /* Activity Feed Card */
@@ -584,7 +608,8 @@ body {
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-sm);
     border: 1px solid var(--gray-200);
-    transition: all 0.2s ease;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    scroll-margin-top: 2rem;
 }
 
 .leaderboard-item:hover {
